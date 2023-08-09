@@ -3,6 +3,10 @@ Simple hook to use the Fetch API in react for ajax calls. Supports chunked uploa
 
 ## Sample Usage
 ```
+const { uploadInit, onFile } = useFileUpload();
+```
+
+```
 uploadInit({
     url: '/file-upload-url',
     chunkSize: 500000,
@@ -39,4 +43,9 @@ uploadInit({
         });
     }
 });
+```
+
+  
+```
+<input type="file" onChange={ onFile }  />
 ```
