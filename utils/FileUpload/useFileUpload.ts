@@ -49,11 +49,20 @@ export default function useFileUpload() {
         const id = (event.target as HTMLFormElement).id;
         const dataset = (event.target as HTMLFormElement).dataset;
         const filesToAdd: FormData[] = [];
+        let newData = {...data};
 
         fileList.forEach(file => {
-            const filesize = file.size;   
- 
-            if (!data.chunkSize || data.chunkSize >= filesize) {
+            const filesize = file.size;
+
+            // prevents the GIF image to be send on chunks
+            if (file.type === 'image/gif') {
+                newData = {
+                    ...data,
+                    chunkSize: 0
+                }
+            }
+            
+            if (!newData.chunkSize || newData.chunkSize >= filesize) {
                 const formData = new FormData();
                 if (id) {
                     formData.append('id', id);
@@ -63,7 +72,7 @@ export default function useFileUpload() {
                 setDataset(dataset, formData);
                 filesToAdd.push(formData);
             } else {
-                const count = Math.ceil(filesize / data.chunkSize);
+                const count = Math.ceil(filesize / newData.chunkSize);
                 let start = 0;
                 let end = Math.ceil(filesize / count);
                 for (let i = 1; i <= count; i++) {
