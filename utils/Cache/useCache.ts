@@ -1,20 +1,27 @@
-import { CachedDataInterface, SetCacheInterface } from './cache.interface';
 import { useCallback } from 'react';
+import { 
+    cacheInterface,
+    cacheObjInterface,
+    cachedDataInterface, 
+    setCacheInterface,
+    cacheToSetInterface,  
+    getPartialCacheInterface,
+    cacheDataInterface
+} from 'Cache.interface';
 
 // persisting state outside of react
-const cachedData: CachedDataInterface[] = [];
-const cacheTime = (10 * 60 * 1000); // default cache duration
-const maxCacheLength = 10; // maximum number of entries we keep
+const cacheObj: cacheObjInterface = {};
+const cacheTime = (10 * 60 * 1000);
 
-export default function useCacheHook() {
+export default function useCache() {
 
     // move this index on top
-    const orderCache = useCallback((index: number): void => {
+    const orderCache = useCallback((index: number, cachedData: cachedDataInterface[]): void => {
         cachedData.unshift(cachedData.splice(index, 1)[0]);
     }, []);
 
     // clean the cache from old data. Execute on setCache and getCache
-    const cleanCache = useCallback((currentDate: number): void => {
+    const cleanCache = useCallback((currentDate: number, cachedData: cachedDataInterface[]): void => {
         if (cachedData.length === 0) return;
         cachedData.forEach((item, index) => {
             if (item.expirationDate <= currentDate) {
@@ -23,41 +30,47 @@ export default function useCacheHook() {
         });
     }, []);
 
-    const setCache = useCallback((data: SetCacheInterface): void => {
+    const setCache = useCallback((data: setCacheInterface): void => {
+        const time = data.cacheTime || cacheTime;
+        const limit = data.cacheLimit || 10;
+        const reorder = data.cacheReorder || true;
         const currentDate = new Date().getTime();
         const duration = (
-            (data.durationInMinutes !== undefined)
-                ? (data.durationInMinutes * 60 * 1000)
-                : cacheTime
+            (data.data.durationInMinutes !== undefined)
+                ? (data.data.durationInMinutes * 60 * 1000)
+                : time
         );
 
         // clean the cache from old data
-        cleanCache(currentDate);
+        cleanCache(currentDate, data.cachedData);
 
         const newItem = {
-            key: data.key,
+            key: data.data.key,
             expirationDate: Math.floor(currentDate + duration),
-            val: data.val
+            val: data.data.val
         };
-        const index = cachedData.findIndex(c => c.key === data.key);
+        const index = data.cachedData.findIndex(c => c.key === data.data.key);
         // we have it already, update and reorder
         if (index !== -1) {
-            cachedData[index] = newItem;
-            orderCache(index);
+            data.cachedData[index] = newItem;
+            if (reorder) {
+                orderCache(index, data.cachedData);
+            }
         } else {
             // first time we add it
-            cachedData.unshift(newItem);
+            data.cachedData.unshift(newItem);
             // check if the cache length has become more than the maximum and limit it if needed
-            if (cachedData.length > maxCacheLength) {
-                cachedData.length = maxCacheLength;
+            if (data.cachedData.length > limit) {
+                data.cachedData.length = limit;
             }
         }
     }, [ cleanCache, orderCache ]);
 
-    const getCache = useCallback((key: string): any => {
+    const getCache = useCallback((key: string, cachedData: cachedDataInterface[], cacheReorder?: boolean): any => {
         const currentDate = new Date().getTime();
+        const reorder = cacheReorder || true;
         // clean the cache from old data
-        cleanCache(currentDate);
+        cleanCache(currentDate, cachedData);
 
         const cacheIndex = cachedData.findIndex(c => c.key === key);
         // we don't have it
@@ -71,14 +84,15 @@ export default function useCacheHook() {
             return null;
         }
 
-        orderCache(cacheIndex);
+        if (reorder) {
+            orderCache(cacheIndex, cachedData);
+        }
 
-        // prevent mutability
-        // the order moved our item first so it's 0 index
+        // prevent accidental mutability
         return JSON.parse(JSON.stringify(cachedData[0].val));
     }, [ cleanCache, orderCache ]);
 
-    const deleteCache = useCallback((key: string): boolean => {
+    const deleteCache = useCallback((key: string, cachedData: cachedDataInterface[]): boolean => {
         const index = cachedData.findIndex(c => c.key === key);
         if (index === -1) {
             return false;
@@ -87,34 +101,93 @@ export default function useCacheHook() {
         return true;
     }, []);
 
-    const flushCache = useCallback((): void => {
+    const flushCache = useCallback((cachedData: cachedDataInterface[]): void => {
         cachedData.splice(0, cachedData.length);
     }, []);
 
-    // you know the part of the key and eventual position, starting with it for example
-    const getPartialCache = useCallback((partialKey: string, index: number): CachedDataInterface[] => {        
-        return cachedData.filter(cache => {
-            const filteredIndex = cache.key.indexOf(partialKey);
+    const getPartialCache = useCallback((data: getPartialCacheInterface): cachedDataInterface[] => { 
+        return data.cachedData.filter((c: cachedDataInterface) => {
+            let filteredIndex = -1;
+
+            if (Array.isArray(data.partialKey)) {
+                data.partialKey.some((item) => {
+                    const index = c.key.indexOf(item);
+                    if (index > -1) {
+                        filteredIndex = index;
+                        return true;
+                    }
+                    return false;
+                });
+            } else {
+                filteredIndex = c.key.indexOf(data.partialKey);
+            }
+
             if (filteredIndex === -1) {
                 return false;
             }
-            if (filteredIndex === index || index === undefined) {
+            if (filteredIndex === data.index || data.index === undefined) {
                 return true;
             }
             return false;
         });
     }, []);
 
-    const deleteMultipleCache = useCallback((cacheKeys: string[]): void => {
-        cacheKeys.forEach(key => deleteCache(key));
+    const deleteMultipleCache = useCallback((cacheArr: cachedDataInterface[], cachedData: cachedDataInterface[]): void => {
+        cacheArr.forEach((item: cachedDataInterface) => {
+            deleteCache(item.key, cachedData);
+        });
     }, [ deleteCache ]);
 
+    const accessCache = useCallback((data: cacheDataInterface): cacheInterface => {
+        function Cache(data: cacheDataInterface): cacheInterface {
+            if (cacheObj[data.name] === undefined) {
+                cacheObj[data.name] = [] as cachedDataInterface[];
+            }
+    
+            const set = (cacheToSet: cacheToSetInterface, maxLimit?: number, timeInMinutes?: number): void => {
+                setCache({
+                    data: cacheToSet,
+                    cachedData: cacheObj[data.name],
+                    cacheTime: timeInMinutes ? (timeInMinutes * 60 * 1000) : undefined,
+                    cacheLimit: maxLimit,
+                    cacheReorder: data.reorder
+                });
+            };
+    
+            const get = (cacheName: string): any => {
+                return getCache(cacheName, cacheObj[data.name], data.reorder);
+            };
+    
+            const getPartial = (partialKey: string | string[], index?: number): cachedDataInterface[] => {
+                return getPartialCache({ partialKey, cachedData: cacheObj[data.name], index });
+            };
+    
+            const del = (cacheName: string): boolean => {
+                return deleteCache(cacheName, cacheObj[data.name]);
+            };
+    
+            const delMultiple = (cacheArr: cachedDataInterface[]): void => {
+                deleteMultipleCache(cacheArr, cacheObj[data.name]);
+            };
+    
+            const flush = (): void => {
+                flushCache(cacheObj[data.name]);
+            };
+            
+            return {
+                set,
+                get,
+                getPartial,
+                del,
+                delMultiple,
+                flush
+            }
+        }
+
+        return new (Cache as any)(data);
+    }, [ setCache, getCache, getPartialCache, deleteCache, deleteMultipleCache, flushCache ]);
+
     return {
-        getCache,
-        setCache,
-        deleteCache,
-        flushCache,
-        getPartialCache,
-        deleteMultipleCache
+        accessCache
     }
 }
